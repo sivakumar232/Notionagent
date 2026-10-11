@@ -12,16 +12,8 @@ from notionagent.nodes import (
 )
 
 
-# 1. State Definition
-class AgentState(TypedDict):
-    user_query: str
-    is_valid_request: bool
-    rejection_reason: Optional[str]
-    plan: List[Dict[str, Any]]
-    current_step_index: int
-    has_error: bool
-    error_message: Optional[str]
-    final_response: Optional[str]
+from notionagent.state import AgentState
+
 
 
 # 2. Conditional Routers

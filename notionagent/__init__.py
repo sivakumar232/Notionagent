@@ -2,5 +2,6 @@
 
 from notionagent.agent import NotionAgent
 from notionagent.graph import graph
+from notionagent.state import AgentState
 
-__all__ = ["NotionAgent", "graph"]
+__all__ = ["NotionAgent", "graph", "AgentState"]
