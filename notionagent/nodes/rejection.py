@@ -1,9 +1,11 @@
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from dotenv import load_dotenv
+from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import AzureChatOpenAI
 
+from notionagent.prompts import rejection_prompt_template
 from notionagent.state import AgentState
 
 # Setup logger
@@ -11,40 +13,35 @@ logger = logging.getLogger("notionagent.rejection")
 
 load_dotenv()
 
-# Safe initialization of Azure OpenAI Client
-client = None
-try:
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-    deployment = (
-        os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-        or os.getenv("AZURE_OPENAI_DEPLOYMENT")
-        or "gpt-4o-mini"
-    )
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
 
-    if endpoint and api_key:
-        client = AzureChatOpenAI(
+def get_azure_chat_client(temperature: float = 0.3) -> Optional[AzureChatOpenAI]:
+    """Initializes and returns the latest LangChain AzureChatOpenAI client."""
+    try:
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        deployment = (
+            os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+            or os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            or "gpt-4.1-mini"
+        )
+        api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
+
+        if not endpoint or not api_key:
+            logger.warning("Azure OpenAI credentials not fully set in environment. Fallback active.")
+            return None
+
+        return AzureChatOpenAI(
             azure_endpoint=endpoint,
             azure_deployment=deployment,
             api_key=api_key,
             api_version=api_version,
-            temperature=0.3,
+            temperature=temperature,
+            max_retries=2,
+            timeout=15.0,
         )
-    else:
-        logger.warning("Azure OpenAI credentials not fully set. Using deterministic fallback.")
-except Exception as e:
-    logger.warning(f"Could not initialize AzureChatOpenAI client: {e}. Fallback active.")
-
-
-REJECTION_SYSTEM_PROMPT = """You are the voice of a specialized Notion Workspace Assistant.
-The user's query was filtered out by our security and scope guardrail.
-
-Your task:
-1. Politely and concisely inform the user that their request cannot be fulfilled.
-2. Reference the specific reason why (e.g. off-topic, general coding, trivia, or prompt injection).
-3. Briefly guide them on what you CAN do (e.g., searching Notion pages, managing sprint tasks, reviewing to-dos, tracking expenses, or organizing workspace documentation).
-4. Keep your response under 3 sentences. Be helpful, professional, and friendly."""
+    except Exception as e:
+        logger.warning(f"Could not initialize AzureChatOpenAI client: {e}. Fallback active.")
+        return None
 
 
 def _get_deterministic_rejection(rejection_reason: str) -> str:
@@ -57,24 +54,18 @@ def _get_deterministic_rejection(rejection_reason: str) -> str:
 
 async def get_rejection(user_query: str, rejection_reason: str) -> str:
     """Asynchronously generates a polite rejection message using Azure OpenAI with fallback."""
+    client = get_azure_chat_client(temperature=0.3)
     if client is None:
         return _get_deterministic_rejection(rejection_reason)
 
     try:
-        messages = [
-            {"role": "system", "content": REJECTION_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    f"User Query: '{user_query}'\n"
-                    f"Guardrail Reason: '{rejection_reason}'\n\n"
-                    f"Generate a polite rejection response:"
-                ),
-            },
-        ]
-        # Non-blocking async invocation
-        response = await client.ainvoke(messages)
-        return str(response.content)
+        # Pattern 1: Declarative LCEL Chain (Prompt | LLM | Parser)
+        chain = rejection_prompt_template | client | StrOutputParser()
+        response = await chain.ainvoke({
+            "user_query": user_query,
+            "rejection_reason": rejection_reason,
+        })
+        return str(response).strip()
 
     except Exception as e:
         logger.warning(f"Azure OpenAI generation failed ({type(e).__name__}): {e}. Using deterministic fallback.")

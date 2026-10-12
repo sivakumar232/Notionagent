@@ -12,7 +12,7 @@ from notionagent.nodes import (
 )
 
 
-from notionagent.state import AgentState
+from notionagent.state import AgentState, InputState, OutputState
 
 
 
@@ -38,7 +38,7 @@ def route_after_executor(state: AgentState) -> str:
 
 
 # 3. Graph Assembly
-builder = StateGraph(AgentState)
+builder = StateGraph(AgentState, input_schema=InputState, output_schema=OutputState)
 
 # Add Nodes
 builder.add_node("guard", guard_node)
