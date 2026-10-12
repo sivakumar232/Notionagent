@@ -1,9 +1,14 @@
 import asyncio
+import os
 import sys
 from typing import Any, AsyncGenerator, Dict, Optional
+from dotenv import load_dotenv
 from langgraph.checkpoint.memory import MemorySaver
 
 from notionagent.graph import builder, graph
+
+# Ensure environment variables (including LangSmith tracing flags) are loaded early
+load_dotenv()
 
 
 class NotionAgent:
@@ -41,6 +46,9 @@ class NotionAgent:
         config = {
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 50,
+            "run_name": "NotionAgent",
+            "tags": ["notionagent"],
+            "metadata": {"thread_id": thread_id},
         }
         initial_state = self._prepare_initial_state(query)
 
@@ -56,6 +64,9 @@ class NotionAgent:
         config = {
             "configurable": {"thread_id": thread_id},
             "recursion_limit": 50,
+            "run_name": "NotionAgent",
+            "tags": ["notionagent"],
+            "metadata": {"thread_id": thread_id},
         }
         initial_state = self._prepare_initial_state(query)
         return await self.app.ainvoke(initial_state, config=config)

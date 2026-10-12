@@ -100,6 +100,13 @@ def _resolve_step_input(
     return resolved
 
 
+def _unwrap_exception(exc: BaseException) -> str:
+    """Recursively unpacks Python ExceptionGroup to get the underlying error message."""
+    if hasattr(exc, "exceptions") and exc.exceptions:
+        return "; ".join(_unwrap_exception(sub) for sub in exc.exceptions)
+    return str(exc)
+
+
 async def executor_node(state: AgentState) -> Dict[str, Any]:
     """4. Executor node: Executes one planned step at a time via Notion MCP with ID propagation."""
     plan = list(state.get("plan") or [])
@@ -154,10 +161,11 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        logger.exception(f"Execution failed on step {current_idx + 1}: {e}")
+        detailed_error = _unwrap_exception(e)
+        logger.exception(f"Execution failed on step {current_idx + 1}: {detailed_error}")
         return {
             "has_error": True,
-            "error_message": f"Step {current_idx + 1} ({tool_name}) failed: {str(e)}",
+            "error_message": f"Step {current_idx + 1} ({tool_name}) failed: {detailed_error}",
             "step_results": step_results,
             "workspace_context": workspace_context,
         }

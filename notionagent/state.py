@@ -11,9 +11,14 @@ class InputState(TypedDict):
 class OutputState(TypedDict):
     """Public output payload returned to the caller or UI."""
 
+    user_query: str
+    is_valid_request: bool
+    rejection_reason: Optional[str]
     final_response: Optional[str]
     has_error: bool
     error_message: Optional[str]
+    plan: List[Dict[str, Any]]
+    step_results: List[Dict[str, Any]]
 
 
 class AgentState(TypedDict):
