@@ -53,7 +53,6 @@ def get_azure_chat_client(temperature: float = 0.0) -> AzureChatOpenAI:
         timeout=30.0,
     )
 
-
 def build_planner_chain(client: Optional[AzureChatOpenAI] = None):
     """Builds and returns the LCEL chain with Azure OpenAI structured outputs."""
     if client is None:
