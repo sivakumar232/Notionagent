@@ -119,6 +119,42 @@ class NotionMCPClient:
             # If server discovery fails temporarily, return cached or empty list
             return self._cached_tools or []
 
+    async def get_tools_documentation(self) -> str:
+        """Returns concise, formatted documentation of all discovered Notion MCP tools."""
+        tools = await self.get_tools()
+        if not tools:
+            # Fallback if MCP connection is unavailable
+            return "\n".join(f"- `{alias}`: Calls {mcp_name}" for alias, mcp_name in TOOL_ALIASES.items())
+
+        alias_lookup: Dict[str, List[str]] = {}
+        for alias, mcp_name in TOOL_ALIASES.items():
+            alias_lookup.setdefault(mcp_name, []).append(alias)
+
+        doc_lines: List[str] = []
+        for tool in tools:
+            fn = tool.get("function", {})
+            name = fn.get("name", "")
+            raw_desc = fn.get("description", "").strip()
+            clean_desc = raw_desc.split("Error Responses:")[0].strip()
+
+            aliases = alias_lookup.get(name, [])
+            alias_text = f" (Aliases: {', '.join(f'`{a}`' for a in aliases)})" if aliases else ""
+
+            params = fn.get("parameters", {})
+            properties = params.get("properties", {})
+            required = params.get("required", [])
+
+            prop_summaries = []
+            for prop_name, prop_info in properties.items():
+                p_type = prop_info.get("type", "any")
+                is_req = "required" if prop_name in required else "optional"
+                prop_summaries.append(f"{prop_name}: {p_type} ({is_req})")
+
+            param_str = ", ".join(prop_summaries[:8]) if prop_summaries else "none"
+            doc_lines.append(f"- `{name}`{alias_text}: {clean_desc}\n  Inputs: {param_str}")
+
+        return "\n".join(doc_lines)
+
     def resolve_tool_name(self, name: str, available_names: Optional[List[str]] = None) -> str:
         """Resolves planner action names or aliases to exact Notion MCP tool names."""
         if not available_names:

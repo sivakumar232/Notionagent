@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from langchain_openai import AzureChatOpenAI
+from notionagent.mcp_client import notion_mcp_client
 from notionagent.prompts import planner_prompt_template
 from notionagent.state import AgentState
 
@@ -17,7 +18,7 @@ load_dotenv()
 class Step(BaseModel):
     step_number: int = Field(description="Sequential step index starting from 1")
     description: str = Field(description="What this step accomplishes")
-    tool: str = Field(description="Name of the tool: search, read_page, create_page, update_page, etc.")
+    tool: str = Field(description="Name of the tool or alias to execute")
     tool_input: Dict[str, Any] = Field(default_factory=dict, description="Arguments for the tool")
 
 
@@ -68,12 +69,16 @@ async def generate_plan(
     workspace_context: Optional[Dict[str, Any]] = None,
     client: Optional[AzureChatOpenAI] = None,
 ) -> Plan:
-    """Invokes the planner chain to generate a structured Plan."""
+    """Invokes the planner chain to generate a structured Plan with dynamic MCP tools."""
     chain = build_planner_chain(client=client)
+
+    # Fetch live tool specifications directly from the Notion MCP client
+    tools_doc = await notion_mcp_client.get_tools_documentation()
 
     plan = await chain.ainvoke({
         "user_query": user_query,
         "workspace_context": workspace_context or {},
+        "tools_documentation": tools_doc,
     })
 
     if not isinstance(plan, Plan):
