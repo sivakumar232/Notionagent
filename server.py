@@ -1,5 +1,6 @@
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -8,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from notionagent.agent import NotionAgent
+from notionagent.mcp_client import registry
 
 load_dotenv()
 
@@ -15,12 +17,24 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("notionagent.server")
 
-# Initialize FastAPI app
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Connecting to Notion MCP Registry at server startup...")
+    await registry.connect()
+    yield
+    logger.info("Disconnecting Notion MCP Registry on server shutdown...")
+    await registry.disconnect()
+
+
+# Initialize FastAPI app with persistent lifespan
 app = FastAPI(
     title="NotionAgent API",
     description="Production-grade AI Agent API for Notion Workspaces powered by LangGraph and MCP",
     version="0.1.0",
+    lifespan=lifespan,
 )
+
 
 # Enable CORS for web frontend clients
 app.add_middleware(
