@@ -49,6 +49,8 @@ class ChatResponse(BaseModel):
     error_message: Optional[str] = None
     steps_executed: int = 0
     plan: Optional[list] = None
+    is_goal_satisfied: Optional[bool] = None
+    reflection_count: Optional[int] = 0
 
 
 @app.get("/health")
@@ -81,6 +83,8 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
             error_message=final_state.get("error_message"),
             steps_executed=len(step_results),
             plan=plan,
+            is_goal_satisfied=final_state.get("is_goal_satisfied"),
+            reflection_count=final_state.get("reflection_count", 0),
         )
     except Exception as e:
         logger.exception(f"Error processing chat request: {e}")

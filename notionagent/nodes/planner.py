@@ -67,18 +67,40 @@ def build_planner_chain(client: Optional[AzureChatOpenAI] = None):
 async def generate_plan(
     user_query: str,
     workspace_context: Optional[Dict[str, Any]] = None,
+    reflection_critique: Optional[str] = None,
+    step_results: Optional[List[Dict[str, Any]]] = None,
     client: Optional[AzureChatOpenAI] = None,
 ) -> Plan:
-    """Invokes the planner chain to generate a structured Plan with dynamic MCP tools."""
+    """Invokes the planner chain to generate a structured Plan with dynamic MCP tools and reflection feedback."""
     chain = build_planner_chain(client=client)
 
     # Fetch live tool specifications directly from the Notion MCP client
     tools_doc = await notion_mcp_client.get_tools_documentation()
 
+    # Format feedback from previous attempt if replanning
+    if reflection_critique:
+        feedback_parts = [
+            f"\n--- PREVIOUS ATTEMPT FEEDBACK ---",
+            f"Critique: {reflection_critique}",
+        ]
+        if step_results:
+            recent_steps = [
+                f"- Step {s.get('step_number')}: [{s.get('tool')}] -> {str(s.get('output', ''))[:150]}"
+                for s in step_results[-3:]
+            ]
+            feedback_parts.append("Recent Execution Results:\n" + "\n".join(recent_steps))
+        feedback_parts.append(
+            "Please adjust your plan steps to overcome this issue and accomplish the user query.\n----------------------------------"
+        )
+        reflection_feedback = "\n".join(feedback_parts)
+    else:
+        reflection_feedback = ""
+
     plan = await chain.ainvoke({
         "user_query": user_query,
         "workspace_context": workspace_context or {},
         "tools_documentation": tools_doc,
+        "reflection_feedback": reflection_feedback,
     })
 
     if not isinstance(plan, Plan):
@@ -88,7 +110,7 @@ async def generate_plan(
 
 
 async def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """3. Planner node: Decomposes request into sequential steps."""
+    """3. Planner node: Decomposes request into sequential steps with reflection awareness."""
     user_query = str(state.get("user_query") or "").strip()
     if not user_query:
         logger.warning("Empty user_query passed to planner_node.")
@@ -101,12 +123,20 @@ async def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     workspace_context = dict(state.get("workspace_context") or {})
+    step_results = list(state.get("step_results") or [])
+    reflection_critique = state.get("reflection_critique")
 
     try:
-        logger.info(f"Generating plan for query: '{user_query}'")
+        if reflection_critique:
+            logger.info(f"Replanning for query '{user_query}' with critique: {reflection_critique}")
+        else:
+            logger.info(f"Generating initial plan for query: '{user_query}'")
+
         plan = await generate_plan(
             user_query=user_query,
             workspace_context=workspace_context,
+            reflection_critique=reflection_critique,
+            step_results=step_results,
         )
 
         plan_steps = [step.model_dump() for step in plan.steps]
@@ -117,8 +147,9 @@ async def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "plan": plan_steps,
             "current_step_index": 0,
-            "step_results": [],
+            "step_results": step_results,
             "workspace_context": workspace_context,
+            "reflection_critique": None,  # Consumed
             "has_error": False,
             "error_message": None,
         }
@@ -128,7 +159,7 @@ async def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "plan": [],
             "current_step_index": 0,
-            "step_results": [],
+            "step_results": step_results,
             "has_error": True,
             "error_message": f"Planner failed to generate plan: {str(e)}",
         }

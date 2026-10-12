@@ -17,6 +17,7 @@ Planning Guidelines:
 
 planner_prompt_template = ChatPromptTemplate.from_messages([
     ("system", PLANNER_SYSTEM_PROMPT),
-    ("user", "User Query: {user_query}\nWorkspace Context: {workspace_context}\nGenerate a structured execution plan:"),
+    ("user", "User Query: {user_query}\nWorkspace Context: {workspace_context}\n{reflection_feedback}\nGenerate a structured execution plan:"),
 ])
+
 

@@ -31,10 +31,17 @@ class NotionAgent:
             "rejection_reason": None,
             "plan": [],
             "current_step_index": 0,
+            "step_results": [],
+            "workspace_context": {},
+            "reflection_count": 0,
+            "max_reflections": 3,
+            "is_goal_satisfied": False,
+            "reflection_critique": None,
             "has_error": False,
             "error_message": None,
             "final_response": None,
         }
+
 
     async def astream(
         self, query: str, thread_id: str = "default_thread"
