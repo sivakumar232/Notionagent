@@ -20,11 +20,11 @@ logger = logging.getLogger("notionagent.server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Connecting to Notion MCP Registry at server startup...")
-    await registry.connect()
-    yield
-    logger.info("Disconnecting Notion MCP Registry on server shutdown...")
-    await registry.disconnect()
+    logger.info("Initializing Notion MCP Registry at server startup...")
+    async with registry.lifespan_session():
+        yield
+    logger.info("Notion MCP Registry shut down cleanly.")
+
 
 
 # Initialize FastAPI app with persistent lifespan
