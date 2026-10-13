@@ -126,15 +126,20 @@ def _resolve_step_input(
     if database_name and database_name in context.databases:
         resolved.setdefault("database_id", context.databases[database_name])
 
-    # 2. Check each key for placeholder tokens (e.g. '<to_be_filled>')
+    # 2. Check each key for placeholder tokens (e.g. '<to_be_filled>', '{new_page_id}')
     for key, val in list(resolved.items()):
         val_str = str(val or "").strip()
         is_placeholder = (
             val is None
             or val_str == ""
             or val_str.startswith("<")
+            or val_str.startswith("{")
+            or val_str.endswith("}")
+            or val_str.endswith(">")
             or "to_be_filled" in val_str.lower()
             or "placeholder" in val_str.lower()
+            or "new_page" in val_str.lower()
+            or (key in ("page_id", "block_id", "id", "parent_id", "database_id") and not UUID_PATTERN.search(val_str))
         )
 
         if is_placeholder:
@@ -142,7 +147,7 @@ def _resolve_step_input(
                 resolved_id = context.last_page_id or context.last_found_id
                 if resolved_id:
                     resolved[key] = resolved_id
-                    logger.info(f"Resolved placeholder '{key}' -> '{resolved_id}'")
+                    logger.info(f"Resolved placeholder '{key}' ({val_str}) -> '{resolved_id}'")
 
             elif key in ("parent_id", "database_id"):
                 resolved_id = (
@@ -152,11 +157,29 @@ def _resolve_step_input(
                 )
                 if resolved_id:
                     resolved[key] = resolved_id
-                    logger.info(f"Resolved placeholder '{key}' -> '{resolved_id}'")
+                    logger.info(f"Resolved placeholder '{key}' ({val_str}) -> '{resolved_id}'")
 
-    # 3. Fallback injection if tool requires page_id and it's missing
-    if ("page" in tool_name.lower() or "block" in tool_name.lower()) and "page_id" not in resolved:
-        if context.last_page_id:
+    if "parent" in resolved and isinstance(resolved["parent"], dict):
+        p_id = str(resolved["parent"].get("page_id") or "")
+        if p_id and (p_id.startswith("{") or p_id.startswith("<") or not UUID_PATTERN.search(p_id)):
+            target_id = context.last_page_id or context.last_found_id or os.getenv("NOTION_PARENT_PAGE_ID")
+            if target_id:
+                resolved["parent"]["page_id"] = target_id
+
+    # 3. Smart parameter injection based on specific tool type
+    clean_tool = tool_name.lower().replace("-", "_")
+    if "create" in clean_tool or "post_page" in clean_tool:
+        if "parent_id" not in resolved and "parent" not in resolved:
+            target_parent = context.last_page_id or context.last_found_id or os.getenv("NOTION_PARENT_PAGE_ID")
+            if target_parent:
+                resolved["parent_id"] = target_parent
+    elif "block" in clean_tool or "patch" in clean_tool or "children" in clean_tool:
+        if "block_id" not in resolved:
+            target_block = context.last_page_id or context.last_found_id
+            if target_block:
+                resolved["block_id"] = target_block
+    elif "search" not in clean_tool and "user" not in clean_tool:
+        if "page_id" not in resolved and context.last_page_id:
             resolved["page_id"] = context.last_page_id
 
     return resolved

@@ -8,8 +8,10 @@ Available tools in the Notion environment (discovered live from the Notion MCP s
 {tools_documentation}
 
 Planning Guidelines:
-- You can specify tool names using either their exact MCP names (e.g. `API-post-search`, `API-post-page`) or their friendly aliases (e.g. `search`, `create_page`, `query_database`, `append_block`, `get_users`).
+- You can specify tool names using either their exact MCP names (e.g. `API-post-search`, `API-post-page`, `API-patch-block-children`) or their friendly aliases (e.g. `search`, `create_page`, `append_block`, `query_database`, `get_users`).
 - If a user asks to view, edit, or append to a page/database whose ID is unknown, begin with a search or listing step to locate it.
+- Creating a new page (`create_page` or `API-post-page`): Specify `parent: {{"page_id": "<parent_page_id>"}}` (or `parent_id`), and `title: "<page title>"`. Do NOT include `page_id` in the request body for creating a page.
+- Adding blocks or headings (`append_block` or `API-patch-block-children`): Specify `block_id: "<target_page_or_block_id>"`. Do NOT include `page_id` in the request body. For headings, specify `block_type: "heading_2"` and `content: "<heading text>"` (or pass children with `heading_2.rich_text`).
 - Keep the number of steps minimal and necessary (typically 1 to 4 steps).
 - Ensure steps are sequentially numbered starting from 1.
 - Each step must have a clear description and specific tool with required input parameters.

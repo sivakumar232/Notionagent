@@ -173,14 +173,18 @@ class NotionToolRegistry:
         return list(self._tool_map.keys())
 
     def _normalize_id(self, raw_id: Optional[str]) -> str:
-        """Strips hyphens from UUID if present, returning standard 32-char hex string."""
+        """Returns standard hyphenated 36-char UUID (8-4-4-4-12) format required by Notion API."""
         if not raw_id:
             return ""
         val = str(raw_id).strip()
         match = UUID_PATTERN.search(val)
         if match:
-            return match.group(0).replace("-", "")
-        return val.replace("-", "")
+            clean = match.group(0).replace("-", "")
+            if len(clean) == 32:
+                import uuid
+                return str(uuid.UUID(clean))
+            return match.group(0)
+        return val
 
     def resolve_tool_name(self, name: str) -> str:
         """Resolves alias or normalized name to exact Notion MCP tool name."""
@@ -220,41 +224,139 @@ class NotionToolRegistry:
             return payload
 
         if tool_name == "API-post-page":
+            # Extract and format parent
             parent = args.get("parent")
-            raw_parent = args.get("parent_id") or args.get("page_id")
+            raw_parent = args.pop("parent_id", None) or args.pop("page_id", None)
             default_parent = os.getenv("NOTION_PARENT_PAGE_ID")
 
-            if not isinstance(parent, dict):
-                has_uuid = bool(raw_parent and UUID_PATTERN.search(str(raw_parent)))
-                target_parent = raw_parent if has_uuid else default_parent
+            if isinstance(parent, dict):
+                if "page_id" in parent:
+                    parent["page_id"] = self._normalize_id(parent["page_id"])
+                elif "database_id" in parent:
+                    parent["database_id"] = self._normalize_id(parent["database_id"])
+                args["parent"] = parent
+            elif isinstance(parent, str) and UUID_PATTERN.search(parent):
+                args["parent"] = {"page_id": self._normalize_id(parent)}
+            else:
+                target_parent = raw_parent or default_parent
                 if target_parent and UUID_PATTERN.search(str(target_parent)):
                     args["parent"] = {"page_id": self._normalize_id(str(target_parent))}
-                elif default_parent and UUID_PATTERN.search(str(default_parent)):
-                    args["parent"] = {"page_id": self._normalize_id(str(default_parent))}
 
-            if "properties" not in args:
-                title = str(args.get("title") or args.get("name") or "Untitled")
-                args["properties"] = {"title": [{"text": {"content": title}}]}
+            # Exclude top-level page_id and parent_id from API-post-page body
+            args.pop("page_id", None)
+            args.pop("parent_id", None)
 
-            if "children" not in args and "content" in args:
+            # Ensure properties has valid title format
+            if "properties" not in args or not isinstance(args["properties"], dict):
+                title = str(args.pop("title", None) or args.pop("name", None) or "Untitled")
+                args["properties"] = {
+                    "title": [
+                        {
+                            "type": "text",
+                            "text": {"content": title}
+                        }
+                    ]
+                }
+            else:
+                props = args["properties"]
+                for title_key in ("title", "Name", "name"):
+                    if title_key in props:
+                        val = props[title_key]
+                        if isinstance(val, str):
+                            props[title_key] = [{"type": "text", "text": {"content": val}}]
+                        elif isinstance(val, list):
+                            for item in val:
+                                if isinstance(item, dict) and "text" in item and "type" not in item:
+                                    item["type"] = "text"
+
+            # Format children if passed as string content or body
+            content = args.pop("content", None) or args.pop("body", None)
+            if content and "children" not in args:
                 args["children"] = [{
                     "object": "block",
                     "type": "paragraph",
-                    "paragraph": {"rich_text": [{"text": {"content": str(args["content"])}}]},
+                    "paragraph": {
+                        "rich_text": [{
+                            "type": "text",
+                            "text": {"content": str(content)}
+                        }]
+                    },
                 }]
 
         if tool_name == "API-patch-block-children":
-            if "children" not in args and "content" in args:
-                block_type = str(args.get("block_type") or "paragraph").lower()
-                text_content = str(args["content"])
-                schema = {"rich_text": [{"text": {"content": text_content}}]}
-                if block_type in ("to_do", "todo"):
-                    block_obj = {"object": "block", "type": "to_do", "to_do": schema}
-                elif block_type in ("heading_1", "heading_2", "heading_3", "bulleted_list_item", "numbered_list_item"):
-                    block_obj = {"object": "block", "type": block_type, block_type: schema}
+            # Map page_id or id to block_id
+            raw_block_id = args.get("block_id") or args.pop("page_id", None) or args.pop("id", None)
+            if raw_block_id:
+                args["block_id"] = self._normalize_id(str(raw_block_id))
+
+            # Exclude page_id from top level request body
+            args.pop("page_id", None)
+
+            # Build or sanitize children block objects
+            if "children" not in args or not args["children"]:
+                block_type = str(
+                    args.pop("block_type", None)
+                    or args.pop("type", None)
+                    or "paragraph"
+                ).lower()
+                text_content = str(
+                    args.pop("content", None)
+                    or args.pop("text", None)
+                    or args.pop("heading", None)
+                    or args.pop("title", None)
+                    or ""
+                )
+
+                rich_text = [{"type": "text", "text": {"content": text_content}}]
+
+                if block_type in ("heading_1", "heading_2", "heading_3"):
+                    block_obj = {
+                        "object": "block",
+                        "type": block_type,
+                        block_type: {"rich_text": rich_text}
+                    }
+                elif block_type in ("to_do", "todo"):
+                    block_obj = {
+                        "object": "block",
+                        "type": "to_do",
+                        "to_do": {"rich_text": rich_text, "checked": False}
+                    }
+                elif block_type in ("bulleted_list_item", "numbered_list_item"):
+                    block_obj = {
+                        "object": "block",
+                        "type": block_type,
+                        block_type: {"rich_text": rich_text}
+                    }
                 else:
-                    block_obj = {"object": "block", "type": "paragraph", "paragraph": schema}
+                    block_obj = {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {"rich_text": rich_text}
+                    }
                 args["children"] = [block_obj]
+            else:
+                sanitized_children = []
+                for child in args["children"]:
+                    if isinstance(child, str):
+                        sanitized_children.append({
+                            "object": "block",
+                            "type": "paragraph",
+                            "paragraph": {"rich_text": [{"type": "text", "text": {"content": child}}]}
+                        })
+                    elif isinstance(child, dict):
+                        child_dict = dict(child)
+                        child_dict.pop("page_id", None)
+                        if "object" not in child_dict:
+                            child_dict["object"] = "block"
+                        b_type = child_dict.get("type")
+                        if b_type and b_type in child_dict and isinstance(child_dict[b_type], dict):
+                            rt = child_dict[b_type].get("rich_text")
+                            if isinstance(rt, list):
+                                for item in rt:
+                                    if isinstance(item, dict) and "text" in item and "type" not in item:
+                                        item["type"] = "text"
+                        sanitized_children.append(child_dict)
+                args["children"] = sanitized_children
 
         return args
 
