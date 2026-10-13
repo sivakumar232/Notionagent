@@ -19,13 +19,15 @@ class OutputState(TypedDict):
     error_message: Optional[str]
     plan: List[Dict[str, Any]]
     step_results: List[Dict[str, Any]]
+    is_goal_satisfied: Optional[bool]
+    reflection_count: Optional[int]
 
 
 class AgentState(TypedDict):
     """Central LangGraph internal state for NotionAgent execution.
     
     Contains input, guardrail status, plan, runtime execution observations,
-    workspace context (page IDs, database IDs), and error handling.
+    workspace context (page IDs, database IDs), reflection evaluations, and error handling.
     """
 
     # Public user input
@@ -41,9 +43,16 @@ class AgentState(TypedDict):
     step_results: List[Dict[str, Any]]
     workspace_context: Dict[str, Any]
 
+    # Reflection & Evaluator Loop
+    reflection_count: int
+    max_reflections: int
+    is_goal_satisfied: bool
+    reflection_critique: Optional[str]
+
     # Error handling & Circuit breaker
     has_error: bool
     error_message: Optional[str]
 
     # Synthesized final response
     final_response: Optional[str]
+

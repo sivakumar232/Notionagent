@@ -1,5 +1,6 @@
 import json
 import logging
+from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -8,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from notionagent.agent import NotionAgent
+from notionagent.mcp_client import registry
 
 load_dotenv()
 
@@ -15,12 +17,24 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("notionagent.server")
 
-# Initialize FastAPI app
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Initializing Notion MCP Registry at server startup...")
+    async with registry.lifespan_session():
+        yield
+    logger.info("Notion MCP Registry shut down cleanly.")
+
+
+
+# Initialize FastAPI app with persistent lifespan
 app = FastAPI(
     title="NotionAgent API",
     description="Production-grade AI Agent API for Notion Workspaces powered by LangGraph and MCP",
     version="0.1.0",
+    lifespan=lifespan,
 )
+
 
 # Enable CORS for web frontend clients
 app.add_middleware(
@@ -49,6 +63,8 @@ class ChatResponse(BaseModel):
     error_message: Optional[str] = None
     steps_executed: int = 0
     plan: Optional[list] = None
+    is_goal_satisfied: Optional[bool] = None
+    reflection_count: Optional[int] = 0
 
 
 @app.get("/health")
@@ -81,6 +97,8 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
             error_message=final_state.get("error_message"),
             steps_executed=len(step_results),
             plan=plan,
+            is_goal_satisfied=final_state.get("is_goal_satisfied"),
+            reflection_count=final_state.get("reflection_count", 0),
         )
     except Exception as e:
         logger.exception(f"Error processing chat request: {e}")

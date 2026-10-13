@@ -7,13 +7,11 @@ from notionagent.nodes import (
     rejection_node,
     planner_node,
     executor_node,
+    reflector_node,
     error_node,
     synthesizer_node,
 )
-
-
 from notionagent.state import AgentState, InputState, OutputState
-
 
 
 # 2. Conditional Routers
@@ -25,16 +23,22 @@ def route_after_guard(state: AgentState) -> str:
 
 
 def route_after_executor(state: AgentState) -> str:
-    """Routes to error, next executor step, or synthesizer."""
-    if state.get("has_error", False):
+    """Routes to error if fatal, otherwise passes to reflector for evaluation."""
+    if state.get("has_error", False) and state.get("reflection_count", 0) >= state.get("max_reflections", 3):
         return "error"
-    
-    plan = state.get("plan", [])
-    current_idx = state.get("current_step_index", 0)
-    
-    if current_idx < len(plan):
-        return "executor"
-    return "synthesizer"
+    return "reflector"
+
+
+def route_after_reflector(state: AgentState) -> str:
+    """Routes to synthesizer if goal satisfied or max reflections hit, otherwise loops back to planner."""
+    is_satisfied = bool(state.get("is_goal_satisfied", False))
+    reflection_count = int(state.get("reflection_count", 0))
+    max_reflections = int(state.get("max_reflections", 3))
+
+    if is_satisfied or reflection_count >= max_reflections:
+        return "synthesizer"
+
+    return "planner"
 
 
 # 3. Graph Assembly
@@ -45,6 +49,7 @@ builder.add_node("guard", guard_node)
 builder.add_node("rejection", rejection_node)
 builder.add_node("planner", planner_node)
 builder.add_node("executor", executor_node)
+builder.add_node("reflector", reflector_node)
 builder.add_node("error", error_node)
 builder.add_node("synthesizer", synthesizer_node)
 
@@ -56,7 +61,7 @@ builder.add_conditional_edges(
     {
         "planner": "planner",
         "rejection": "rejection",
-    }
+    },
 )
 builder.add_edge("rejection", END)
 
@@ -67,12 +72,22 @@ builder.add_conditional_edges(
     route_after_executor,
     {
         "error": "error",
-        "executor": "executor",
-        "synthesizer": "synthesizer",
-    }
+        "reflector": "reflector",
+    },
 )
+
+builder.add_conditional_edges(
+    "reflector",
+    route_after_reflector,
+    {
+        "planner": "planner",
+        "synthesizer": "synthesizer",
+    },
+)
+
 builder.add_edge("error", END)
 builder.add_edge("synthesizer", END)
 
 # Compile the Graph
 graph = builder.compile()
+
