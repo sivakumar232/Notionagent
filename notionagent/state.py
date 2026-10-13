@@ -53,6 +53,12 @@ class AgentState(TypedDict):
     has_error: bool
     error_message: Optional[str]
 
+    # Context Loader & Page Structure Awareness
+    target_page_id: Optional[str]
+    page_title: Optional[str]
+    page_outline: Optional[str]
+    raw_blocks: Optional[List[Dict[str, Any]]]
+
     # Synthesized final response
     final_response: Optional[str]
 

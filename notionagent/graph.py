@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, START, END
 from notionagent.nodes import (
     guard_node,
     rejection_node,
+    context_loader_node,
     planner_node,
     executor_node,
     reflector_node,
@@ -16,9 +17,9 @@ from notionagent.state import AgentState, InputState, OutputState
 
 # 2. Conditional Routers
 def route_after_guard(state: AgentState) -> str:
-    """Routes to planner if valid, or rejection if invalid."""
+    """Routes to context_loader if valid, or rejection if invalid."""
     if state.get("is_valid_request", False):
-        return "planner"
+        return "context_loader"
     return "rejection"
 
 
@@ -47,6 +48,7 @@ builder = StateGraph(AgentState, input_schema=InputState, output_schema=OutputSt
 # Add Nodes
 builder.add_node("guard", guard_node)
 builder.add_node("rejection", rejection_node)
+builder.add_node("context_loader", context_loader_node)
 builder.add_node("planner", planner_node)
 builder.add_node("executor", executor_node)
 builder.add_node("reflector", reflector_node)
@@ -59,12 +61,13 @@ builder.add_conditional_edges(
     "guard",
     route_after_guard,
     {
-        "planner": "planner",
+        "context_loader": "context_loader",
         "rejection": "rejection",
     },
 )
 builder.add_edge("rejection", END)
 
+builder.add_edge("context_loader", "planner")
 builder.add_edge("planner", "executor")
 
 builder.add_conditional_edges(

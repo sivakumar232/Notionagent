@@ -66,6 +66,7 @@ def build_planner_chain(client: Optional[AzureChatOpenAI] = None):
 
 async def generate_plan(
     user_query: str,
+    page_outline: Optional[str] = None,
     workspace_context: Optional[Dict[str, Any]] = None,
     reflection_critique: Optional[str] = None,
     step_results: Optional[List[Dict[str, Any]]] = None,
@@ -98,6 +99,7 @@ async def generate_plan(
 
     plan = await chain.ainvoke({
         "user_query": user_query,
+        "page_outline": page_outline or "(No target page outline identified)",
         "workspace_context": workspace_context or {},
         "tools_documentation": tools_doc,
         "reflection_feedback": reflection_feedback,
@@ -122,6 +124,7 @@ async def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "error_message": "Empty query received by planner.",
         }
 
+    page_outline = str(state.get("page_outline") or "").strip()
     workspace_context = dict(state.get("workspace_context") or {})
     step_results = list(state.get("step_results") or [])
     reflection_critique = state.get("reflection_critique")
@@ -130,10 +133,11 @@ async def planner_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if reflection_critique:
             logger.info(f"Replanning for query '{user_query}' with critique: {reflection_critique}")
         else:
-            logger.info(f"Generating initial plan for query: '{user_query}'")
+            logger.info(f"Generating initial plan for query: '{user_query}' with outline: {page_outline[:80]}...")
 
         plan = await generate_plan(
             user_query=user_query,
+            page_outline=page_outline,
             workspace_context=workspace_context,
             reflection_critique=reflection_critique,
             step_results=step_results,

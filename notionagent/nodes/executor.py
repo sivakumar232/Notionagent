@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
+from notionagent.db import entity_repo
 from notionagent.mcp_client import notion_mcp_client
 from notionagent.state import AgentState
 
@@ -64,11 +65,11 @@ def _extract_title(item: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _extract_entities_from_output(
+async def _extract_entities_from_output(
     output_str: str,
     context: StructuredWorkspaceContext,
 ) -> None:
-    """Extracts page/database IDs and maps titles to IDs for all returned items."""
+    """Extracts page/database IDs, maps titles to IDs, and saves them to PostgreSQL."""
     if not output_str or not isinstance(output_str, str):
         return
 
@@ -97,10 +98,18 @@ def _extract_entities_from_output(
                 context.last_page_id = item_id
                 if title:
                     context.pages[title.lower()] = item_id
+                    try:
+                        await entity_repo.upsert_entity(title, item_id, "page")
+                    except Exception as e:
+                        logger.debug(f"Failed to persist page '{title}' to DB: {e}")
             elif obj_type == "database":
                 context.last_database_id = item_id
                 if title:
                     context.databases[title.lower()] = item_id
+                    try:
+                        await entity_repo.upsert_entity(title, item_id, "database")
+                    except Exception as e:
+                        logger.debug(f"Failed to persist database '{title}' to DB: {e}")
 
     except Exception:
         # Fallback regex search for bare UUID
@@ -259,7 +268,7 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
             )
 
             # Update structured entity registry from tool output
-            _extract_entities_from_output(output, context)
+            await _extract_entities_from_output(output, context)
 
             step_record = {
                 "step_number": current_step.get("step_number", idx + 1),

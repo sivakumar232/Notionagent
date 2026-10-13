@@ -23,6 +23,14 @@ class NotionAgent:
         self.checkpointer = checkpointer or MemorySaver()
         self.app = builder.compile(checkpointer=self.checkpointer)
 
+    @classmethod
+    async def create_with_postgres(cls, pool: Any) -> "NotionAgent":
+        """Factory method that sets up persistent AsyncPostgresSaver checkpointer."""
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+        checkpointer = AsyncPostgresSaver(pool)
+        await checkpointer.setup()
+        return cls(checkpointer=checkpointer)
+
     def _prepare_initial_state(self, query: str) -> Dict[str, Any]:
         """Builds default initial state dictionary for a new run."""
         return {

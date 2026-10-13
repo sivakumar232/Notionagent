@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from notionagent.agent import NotionAgent
+from notionagent.db import db_manager
 from notionagent.mcp_client import registry
 
 load_dotenv()
@@ -20,10 +21,22 @@ logger = logging.getLogger("notionagent.server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global agent
+    logger.info("Initializing PostgreSQL Database Pool...")
+    try:
+        await db_manager.initialize()
+        if db_manager._pool is not None:
+            agent = await NotionAgent.create_with_postgres(db_manager._pool)
+            logger.info("NotionAgent configured with persistent PostgreSQL checkpointer!")
+    except Exception as e:
+        logger.warning(f"Could not initialize PostgreSQL checkpointer, falling back to in-memory: {e}")
+
     logger.info("Initializing Notion MCP Registry at server startup...")
     async with registry.lifespan_session():
         yield
-    logger.info("Notion MCP Registry shut down cleanly.")
+
+    await db_manager.close()
+    logger.info("Notion MCP Registry and PostgreSQL pool shut down cleanly.")
 
 
 
