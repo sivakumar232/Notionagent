@@ -24,9 +24,29 @@ def route_after_guard(state: AgentState) -> str:
 
 
 def route_after_executor(state: AgentState) -> str:
-    """Routes to error if fatal, otherwise passes to reflector for evaluation."""
-    if state.get("has_error", False) and state.get("reflection_count", 0) >= state.get("max_reflections", 3):
-        return "error"
+    """Routes after single step execution.
+    - If error and max reflections reached: route to error
+    - If error and reflections left: route to reflector for critique & replanning
+    - If step succeeded and more steps remain in plan: route back to executor for next step
+    - If all steps in plan completed: route to reflector for final goal evaluation
+    """
+    has_error = bool(state.get("has_error", False))
+    reflection_count = int(state.get("reflection_count", 0))
+    max_reflections = int(state.get("max_reflections", 3))
+
+    if has_error:
+        if reflection_count >= max_reflections:
+            return "error"
+        return "reflector"
+
+    plan = list(state.get("plan") or [])
+    current_idx = int(state.get("current_step_index") or 0)
+
+    # If there are more steps remaining in the current plan, execute next step
+    if current_idx < len(plan):
+        return "executor"
+
+    # All planned steps are finished; route to reflector for goal verification
     return "reflector"
 
 
@@ -74,6 +94,7 @@ builder.add_conditional_edges(
     "executor",
     route_after_executor,
     {
+        "executor": "executor",
         "error": "error",
         "reflector": "reflector",
     },

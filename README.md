@@ -19,8 +19,13 @@
 - [Setup & Getting Started](#setup--getting-started)
   - [Prerequisites](#prerequisites)
   - [Environment Variables](#environment-variables)
-  - [Running the Server](#running-the-server)
-  - [API Endpoints](#api-endpoints)
+  - [Installation](#installation)
+  - [Pre-flight Diagnostics](#pre-flight-diagnostics)
+  - [Running the Application](#running-the-application)
+    - [1. Running the FastAPI Server](#1-running-the-fastapi-server)
+    - [2. Running via CLI](#2-running-via-cli)
+    - [3. Programmatic Python Invocation](#3-programmatic-python-invocation)
+  - [API Endpoints & Testing with cURL](#api-endpoints--testing-with-curl)
 - [Implementation Roadmap](#implementation-roadmap)
 
 ---
@@ -76,7 +81,7 @@ The enhanced architecture addresses these challenges through five foundational d
 
 ```mermaid
 flowchart TD
-    USER([👤 User Request]) --> API[⚡ FastAPI /run & /stream]
+    USER([👤 User Request]) --> API[⚡ FastAPI /api/chat & /api/chat/stream]
     API --> GUARD
 
     subgraph LangGraph["🔁 LangGraph State Machine"]
@@ -189,7 +194,7 @@ sequenceDiagram
     participant Refl as Reflector Node
     participant Synth as Synthesizer
 
-    User->>Server: POST /run {"query": "Add task 'Submit quarterly report' under 'Sprint 1' in Tasks"}
+    User->>Server: POST /api/chat {"query": "Add task 'Submit quarterly report' under 'Sprint 1' in Tasks"}
     Server->>Ctx: Invoke ContextLoader
     Ctx->>Mem: Lookup "tasks"
     Mem-->>Ctx: Found page_id: "3f7b67c2-..."
@@ -287,11 +292,26 @@ notionagent/
 - `uv` package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 - Notion Internal Integration Token ([Notion Developers](https://www.notion.so/my-integrations))
 
+### Installation
+
+Clone the repository and install dependencies using `uv`:
+
+```bash
+# Clone the repository
+git clone https://github.com/sivakumar232/Notionagent.git
+cd Notionagent
+
+# Install dependencies into virtual environment
+uv sync
+```
+
+---
+
 ### Environment Variables
 Create a `.env` file in the root directory:
 
 ```env
-# Notion Credentials
+# Notion Credentials (supports NOTION_TOKEN or NOTION_API_KEY)
 NOTION_TOKEN=secret_your_notion_integration_token_here
 NOTION_PARENT_PAGE_ID=your_entry_point_page_uuid_here
 
@@ -300,25 +320,122 @@ AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your_azure_openai_api_key
 AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4.1-mini
 AZURE_OPENAI_API_VERSION=2024-10-21
+
+# PostgreSQL State Checkpointer (Optional - falls back to MemorySaver if unavailable)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/notionagent
+
+# LangSmith Observability & Tracing (Optional)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
+LANGCHAIN_API_KEY=your_langchain_api_key
+LANGCHAIN_PROJECT=notionagent
 ```
 
-### Running the Server
-Install dependencies and launch the server using `uv`:
+---
+
+### Pre-flight Diagnostics
+
+Verify your Azure OpenAI configuration before running the agent:
+
+```bash
+uv run python test_azure.py
+```
+
+---
+
+### Running the Application
+
+You can run NotionAgent as a FastAPI service, directly from your terminal CLI, or import it into your own Python codebase.
+
+#### 1. Running the FastAPI Server
+
+Start the API server with live reloading:
 
 ```bash
 uv run uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### API Endpoints
+Or run via `server.py`:
 
-- **`POST /run`**: Execute an agent command synchronously.
-  ```json
-  {
-    "query": "Create a todo list under my project page with items for sprint planning"
-  }
-  ```
-- **`POST /stream`**: Execute with Server-Sent Events (SSE) streaming updates across graph nodes.
-- **`GET /health`**: Health check and MCP connectivity status.
+```bash
+uv run python server.py
+```
+
+- **Interactive API Documentation (Swagger UI)**: Open [http://localhost:8000/docs](http://localhost:8000/docs) in your browser.
+- **Alternative Docs (ReDoc)**: Open [http://localhost:8000/redoc](http://localhost:8000/redoc).
+
+#### 2. Running via CLI
+
+Run queries directly from the command line without starting the web server:
+
+```bash
+uv run python -m notionagent.agent "Create a weekly sprint meeting page under my Projects page"
+```
+
+#### 3. Programmatic Python Invocation
+
+Integrate NotionAgent directly into your Python scripts or workflows:
+
+```python
+import asyncio
+from notionagent.agent import NotionAgent
+from notionagent.mcp_client import registry
+
+async def main():
+    agent = NotionAgent()
+
+    # The Notion MCP server must run within its lifespan context
+    async with registry.lifespan_session():
+        # Synchronous/Batch completion:
+        result = await agent.ainvoke(
+            query="Add a todo item 'Review pull requests' to my Tasks page",
+            thread_id="session_42",
+        )
+        print("Final Response:", result.get("final_response"))
+
+        # Or stream node-by-node execution:
+        async for step in agent.astream("List recent updates in workspace", thread_id="session_42"):
+            node_name = list(step.keys())[0]
+            print(f"Executed node: {node_name}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+---
+
+### API Endpoints & Testing with cURL
+
+#### Health Check
+```bash
+curl -X GET http://localhost:8000/health
+```
+**Response:**
+```json
+{"status": "healthy", "service": "NotionAgent API"}
+```
+
+#### Execute Agent Request (Synchronous)
+```bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Create a todo list under my project page with items for sprint planning",
+    "thread_id": "thread_abc123"
+  }'
+```
+
+#### Stream Execution Events (Server-Sent Events)
+Stream live node execution status, planning output, and intermediate results in real time:
+
+```bash
+curl -N -X POST http://localhost:8000/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Add a meeting note under my Team Notes page",
+    "thread_id": "thread_abc123"
+  }'
+```
 
 ---
 
@@ -330,6 +447,6 @@ uv run uvicorn server:app --host 0.0.0.0 --port 8000 --reload
 - [x] Robust argument normalizer (UUID formatting, parent wrapper adaptation)
 - [ ] **Phase 1**: Add `ContextLoaderNode` with live Notion block-tree parsing
 - [ ] **Phase 2**: Implement Grounded Verification in `ReflectorNode` via read-after-write
-- [ ] **Phase 3**: Migrate Executor to single-step execution with intermediate reflection
+- [x] **Phase 3**: Migrate Executor to single-step execution with intermediate reflection and duplicate-safe replanning
 - [ ] **Phase 4**: Add SQLite persistent workspace memory across agent runs
 - [ ] **Phase 5**: Intent-based tool filtering to cut prompt token consumption

@@ -64,6 +64,13 @@ async def reflector_node(state: AgentState) -> Dict[str, Any]:
             "output_preview": str(s.get("output", ""))[:300],
         })
 
+    # If the step errored, append explicit error notice
+    if has_error and error_message:
+        summarized_steps.append({
+            "step": "FAILED_STEP",
+            "error": error_message,
+        })
+
     try:
         chain = build_reflector_chain()
         verdict: ReflectionVerdict = await chain.ainvoke({
@@ -77,15 +84,21 @@ async def reflector_node(state: AgentState) -> Dict[str, Any]:
         if not isinstance(verdict, ReflectionVerdict):
             verdict = ReflectionVerdict.model_validate(verdict)
 
+        # If a step errored, the goal cannot be satisfied
+        is_satisfied = verdict.is_goal_satisfied and not has_error
+        critique = verdict.critique if not is_satisfied else None
+        if not critique and has_error:
+            critique = f"Step failed: {error_message}"
+
         new_reflection_count = reflection_count + 1
         logger.info(
-            f"Reflection verdict: is_goal_satisfied={verdict.is_goal_satisfied}, "
-            f"critique='{verdict.critique}' (attempt {new_reflection_count}/{max_reflections})"
+            f"Reflection verdict: is_goal_satisfied={is_satisfied}, "
+            f"critique='{critique}' (attempt {new_reflection_count}/{max_reflections})"
         )
 
         return {
-            "is_goal_satisfied": verdict.is_goal_satisfied,
-            "reflection_critique": verdict.critique if not verdict.is_goal_satisfied else None,
+            "is_goal_satisfied": is_satisfied,
+            "reflection_critique": critique,
             "reflection_count": new_reflection_count,
             "has_error": False,  # Reset error flag to give the replanned attempt a fresh chance
             "error_message": None,
@@ -93,9 +106,9 @@ async def reflector_node(state: AgentState) -> Dict[str, Any]:
 
     except Exception as e:
         logger.exception(f"Error during reflection evaluation: {e}")
-        # Graceful fallback: assume satisfied to avoid blocking synthesizer
+        # Graceful fallback: fail goal if error occurred, or assume satisfied to avoid blocking synthesizer
         return {
-            "is_goal_satisfied": True,
-            "reflection_critique": None,
+            "is_goal_satisfied": not has_error,
+            "reflection_critique": error_message if has_error else None,
             "reflection_count": reflection_count + 1,
         }

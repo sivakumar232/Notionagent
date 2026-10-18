@@ -238,62 +238,64 @@ async def executor_node(state: AgentState) -> Dict[str, Any]:
 
     # If all steps already executed or plan is empty
     if not plan or current_idx >= len(plan):
-        logger.info(f"All {len(plan)} steps executed. Proceeding to synthesizer.")
+        logger.info(f"All {len(plan)} steps executed. Step index: {current_idx}")
         return {
-            "current_step_index": len(plan),
+            "current_step_index": current_idx,
             "step_results": step_results,
             "workspace_context": context.model_dump(),
             "has_error": False,
+            "error_message": None,
         }
 
-    # Execute remaining steps internally with step-level isolation
-    for idx in range(current_idx, len(plan)):
-        current_step = plan[idx]
-        tool_name = current_step.get("tool", "")
-        raw_input = dict(current_step.get("tool_input") or {})
+    # Execute exactly ONE step (current_idx)
+    current_step = plan[current_idx]
+    tool_name = current_step.get("tool", "")
+    raw_input = dict(current_step.get("tool_input") or {})
 
-        resolved_input = _resolve_step_input(tool_name, raw_input, context)
+    resolved_input = _resolve_step_input(tool_name, raw_input, context)
 
-        logger.info(
-            f"Executing Step {idx + 1}/{len(plan)}: [{tool_name}] "
-            f"Description: '{current_step.get('description')}' with input: {resolved_input}"
+    overall_step_num = len(step_results) + 1
+    logger.info(
+        f"Executing Step {current_idx + 1}/{len(plan)} (Overall #{overall_step_num}): [{tool_name}] "
+        f"Description: '{current_step.get('description')}' with input: {resolved_input}"
+    )
+
+    try:
+        output = await _execute_step_with_retry(
+            tool_name=tool_name,
+            tool_input=resolved_input,
+            max_retries=3,
+            base_delay=1.0,
         )
 
-        try:
-            output = await _execute_step_with_retry(
-                tool_name=tool_name,
-                tool_input=resolved_input,
-                max_retries=3,
-                base_delay=1.0,
-            )
+        # Update structured entity registry from tool output
+        await _extract_entities_from_output(output, context)
 
-            # Update structured entity registry from tool output
-            await _extract_entities_from_output(output, context)
+        step_record = {
+            "step_number": overall_step_num,
+            "tool": tool_name,
+            "description": current_step.get("description", ""),
+            "input": resolved_input,
+            "output": output,
+        }
+        step_results.append(step_record)
 
-            step_record = {
-                "step_number": current_step.get("step_number", idx + 1),
-                "tool": tool_name,
-                "description": current_step.get("description", ""),
-                "input": resolved_input,
-                "output": output,
-            }
-            step_results.append(step_record)
+        return {
+            "current_step_index": current_idx + 1,
+            "step_results": step_results,
+            "workspace_context": context.model_dump(),
+            "has_error": False,
+            "error_message": None,
+        }
 
-        except Exception as e:
-            detailed_error = _unwrap_exception(e)
-            logger.exception(f"Execution failed on step {idx + 1}: {detailed_error}")
-            return {
-                "current_step_index": idx,
-                "step_results": step_results,
-                "workspace_context": context.model_dump(),
-                "has_error": True,
-                "error_message": f"Step {idx + 1} ({tool_name}) failed: {detailed_error}",
-            }
+    except Exception as e:
+        detailed_error = _unwrap_exception(e)
+        logger.exception(f"Execution failed on step {current_idx + 1}: {detailed_error}")
+        return {
+            "current_step_index": current_idx,
+            "step_results": step_results,
+            "workspace_context": context.model_dump(),
+            "has_error": True,
+            "error_message": f"Step {current_idx + 1} ({tool_name}) failed: {detailed_error}",
+        }
 
-    return {
-        "current_step_index": len(plan),
-        "step_results": step_results,
-        "workspace_context": context.model_dump(),
-        "has_error": False,
-        "error_message": None,
-    }

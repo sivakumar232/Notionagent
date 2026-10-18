@@ -79,20 +79,28 @@ async def generate_plan(
     tools_doc = await notion_mcp_client.get_tools_documentation()
 
     # Format feedback from previous attempt if replanning
-    if reflection_critique:
-        feedback_parts = [
-            f"\n--- PREVIOUS ATTEMPT FEEDBACK ---",
-            f"Critique: {reflection_critique}",
-        ]
-        if step_results:
-            recent_steps = [
-                f"- Step {s.get('step_number')}: [{s.get('tool')}] -> {str(s.get('output', ''))[:150]}"
-                for s in step_results[-3:]
-            ]
-            feedback_parts.append("Recent Execution Results:\n" + "\n".join(recent_steps))
+    feedback_parts = []
+    if step_results:
+        feedback_parts.append("\n--- COMPLETED STEPS (DO NOT RE-RUN OR DUPLICATE) ---")
+        feedback_parts.append("The following actions were ALREADY executed successfully in Notion:")
+        for s in step_results:
+            s_num = s.get("step_number")
+            tool = s.get("tool")
+            desc = s.get("description", "")
+            out_preview = str(s.get("output", ""))[:200]
+            feedback_parts.append(f"  • Step {s_num} [{tool}] ({desc}) -> Output: {out_preview}")
         feedback_parts.append(
-            "Please adjust your plan steps to overcome this issue and accomplish the user query.\n----------------------------------"
+            "CRITICAL: Do NOT duplicate the above steps (e.g. do NOT re-create pages or blocks that were already created). "
+            "Generate ONLY the remaining steps needed to fulfill the user's objective, using the IDs from completed steps."
         )
+
+    if reflection_critique:
+        feedback_parts.append("\n--- PREVIOUS ATTEMPT FEEDBACK / CRITIQUE ---")
+        feedback_parts.append(f"Critique: {reflection_critique}")
+        feedback_parts.append("Please adjust your remaining plan steps to resolve this critique and fulfill the objective.")
+
+    if feedback_parts:
+        feedback_parts.append("-----------------------------------------------------")
         reflection_feedback = "\n".join(feedback_parts)
     else:
         reflection_feedback = ""

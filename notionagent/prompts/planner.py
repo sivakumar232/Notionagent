@@ -16,6 +16,10 @@ Planning Guidelines:
 - Creating a new page (`create_page` or `API-post-page`): Specify `parent: {{"page_id": "<parent_page_id>"}}` (or `parent_id`), and `title: "<page title>"`. Do NOT include `page_id` in the request body for creating a page.
 - Adding blocks or headings (`append_block` or `API-patch-block-children`): Specify `block_id: "<target_page_or_block_id>"`. Do NOT include `page_id` in the request body. For headings, specify `block_type: "heading_2"` and `content: "<heading text>"` (or pass children with `heading_2.rich_text`).
 - If target page ID is already known or provided in Workspace Context, do NOT generate a redundant search step.
+- Incremental Execution & Replanning:
+  * If 'COMPLETED STEPS' are provided in the feedback, those actions have ALREADY succeeded in Notion.
+  * DO NOT repeat, re-plan, or duplicate any of those completed actions (e.g. NEVER re-create a page or append blocks that were already created).
+  * Generate ONLY the remaining step(s) needed to fulfill the user's objective, referencing the IDs produced by the completed steps.
 - Keep the number of steps minimal and necessary (typically 1 to 4 steps).
 - Ensure steps are sequentially numbered starting from 1.
 - Each step must have a clear description and specific tool with required input parameters.
